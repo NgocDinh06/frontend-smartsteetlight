@@ -224,6 +224,6 @@ const LightControl = () => {
       </Box>
     </Box>
   );
-};
+};//
 
 export default LightControl;
