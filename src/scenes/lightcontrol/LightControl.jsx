@@ -12,67 +12,92 @@ const LightControl = () => {
   const [newLightId, setNewLightId] = useState("");
   const [error, setError] = useState("");
 
-  const handleToggleLight = (lightId) => {
+  const apiCall = async (lightId, action, status = null) => {
+    try {
+      const res = await fetch("/api/status", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: JSON.stringify({ deviceId: lightId, action, status }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Lỗi API");
+      return data;
+    } catch (err) {
+      console.error(err);
+      throw err;
+    }
+  };
+
+  const handleToggleLight = async (lightId) => {
     const newState = !lightStates[lightId].isOn;
+    const action = newState ? "ON" : "OFF";
     const now = new Date();
-    setLightStates((prev) => {
-      const newStates = {
+
+    try {
+      await apiCall(lightId, action);
+
+      setLightStates((prev) => ({
         ...prev,
         [lightId]: {
           ...prev[lightId],
           isOn: newState,
           manualOverride: true,
-          lastOffEvent: null,
           lastManualAction: now.toISOString(),
         },
-      };
-      syncLightStatesWithSchedule(now);
-      return newStates;
-    });
-    setLightHistory((prev) => [
-      ...prev,
-      {
-        lightId,
-        action: newState ? "on" : "off",
-        start: now,
-        end: now,
-        duration: 0,
-        timestamp: now,
-      },
-    ]);
+      }));
+
+      setLightHistory((prev) => [
+        ...prev,
+        {
+          lightId,
+          action: action.toLowerCase(),
+          start: now,
+          end: now,
+          duration: 0,
+          timestamp: now,
+        },
+      ]);
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   const handleBrightnessChange = (lightId, newValue) => {
     setLocalBrightness((prev) => ({ ...prev, [lightId]: newValue }));
   };
 
-  const handleBrightnessChangeCommitted = (lightId, newValue) => {
+  const handleBrightnessChangeCommitted = async (lightId, newValue) => {
     const now = new Date();
-    setLightStates((prev) => {
-      const newStates = {
+    try {
+      await apiCall(lightId, "BRIGHTNESS", newValue);
+
+      setLightStates((prev) => ({
         ...prev,
         [lightId]: {
           ...prev[lightId],
           brightness: newValue,
           manualOverride: true,
-          lastOffEvent: null,
           lastManualAction: now.toISOString(),
         },
-      };
-      syncLightStatesWithSchedule(now);
-      return newStates;
-    });
-    setLightHistory((prev) => [
-      ...prev,
-      {
-        lightId,
-        action: `brightness ${newValue}%`,
-        start: now,
-        end: now,
-        duration: 0,
-        timestamp: now,
-      },
-    ]);
+      }));
+
+      setLightHistory((prev) => [
+        ...prev,
+        {
+          lightId,
+          action: `brightness ${newValue}%`,
+          start: now,
+          end: now,
+          duration: 0,
+          timestamp: now,
+        },
+      ]);
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   const handleAddLight = () => {
@@ -93,7 +118,6 @@ const LightControl = () => {
         power: 100,
         brightness: 50,
         manualOverride: false,
-        lastOffEvent: null,
         lastManualAction: null,
       },
     }));
@@ -118,7 +142,6 @@ const LightControl = () => {
       setLightStates((prev) => {
         const newStates = { ...prev };
         delete newStates[lightId];
-        syncLightStatesWithSchedule(now);
         return newStates;
       });
       setLightHistory((prev) => [
@@ -151,12 +174,7 @@ const LightControl = () => {
             onChange={(e) => setNewLightId(e.target.value)}
             sx={{ input: { color: colors.grey[100] }, label: { color: colors.grey[300] } }}
           />
-          <Button
-            variant="contained"
-            color="success"
-            onClick={handleAddLight}
-            sx={{ height: "40px" }}
-          >
+          <Button variant="contained" color="success" onClick={handleAddLight} sx={{ height: "40px" }}>
             Thêm bóng đèn
           </Button>
         </Box>
@@ -166,12 +184,7 @@ const LightControl = () => {
           </Alert>
         )}
       </Box>
-      <Box
-        display="grid"
-        gridTemplateColumns="repeat(12, 1fr)"
-        gridAutoRows="180px"
-        gap="20px"
-      >
+      <Box display="grid" gridTemplateColumns="repeat(12, 1fr)" gridAutoRows="180px" gap="20px">
         {Object.keys(lightStates).map((lightId) => (
           <Box
             key={lightId}
@@ -198,11 +211,7 @@ const LightControl = () => {
               >
                 {lightStates[lightId].isOn ? "Tắt" : "Bật"}
               </Button>
-              <Button
-                variant="contained"
-                color="error"
-                onClick={() => handleDeleteLight(lightId)}
-              >
+              <Button variant="contained" color="error" onClick={() => handleDeleteLight(lightId)}>
                 Xóa
               </Button>
             </Box>
@@ -224,6 +233,6 @@ const LightControl = () => {
       </Box>
     </Box>
   );
-};//
+};
 
 export default LightControl;
