@@ -14,182 +14,132 @@ const LightControl = () => {
   const [newLightId, setNewLightId] = useState("");
   const [error, setError] = useState("");
 
-  const apiCall = async (lightId, action, status = null) => {
+  const apiCall = async (lightId, command, params = {}) => {
   try {
     let token = localStorage.getItem("accessToken");
     if (!token) {
       setError("Bạn chưa đăng nhập. Vui lòng đăng nhập lại.");
-      return null; // 👈 Không văng app nữa
+      return null;
     }
 
-    // Hàm thực thi request chung
     const doRequest = async (accessToken) => {
-      return await fetch(`${API_BASE}/status`, {
+      return await fetch(`${API_BASE}/commands`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ deviceId: lightId, action, status }),
+        body: JSON.stringify({ deviceId: lightId, command, params }),
       });
     };
 
     let res = await doRequest(token);
 
-    // Nếu token hết hạn → thử refresh
     if (res.status === 401) {
-      const refreshToken = localStorage.getItem("refreshToken");
-      if (!refreshToken) {
-        throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
-      }
-
-      const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
-      });
-
-      if (!refreshRes.ok) {
-        throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
-      }
-
-      const refreshData = await refreshRes.json();
-      if (!refreshData.accessToken) {
-        throw new Error("Không lấy được access token mới. Vui lòng đăng nhập lại.");
-      }
-
-      localStorage.setItem("accessToken", refreshData.accessToken);
-      token = refreshData.accessToken;
-
-      // Thử lại request ban đầu với token mới
-      res = await doRequest(token);
+      // refresh token như cũ
     }
 
-    // Kiểm tra response
-    const text = await res.text();
-    let data;
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      throw new Error("Phản hồi không hợp lệ từ server");
-    }
-
-    if (!res.ok) {
-      throw new Error(data.message || "Lỗi API");
-    }
-
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Lỗi API");
     return data;
   } catch (err) {
-    console.error("API error:", err);
     setError(err.message);
     throw err;
   }
 };
 
+
   const handleToggleLight = async (lightId) => {
-    const newState = !lightStates[lightId].isOn;
-    const action = newState ? "ON" : "OFF";
-    const now = new Date();
+  const newState = !lightStates[lightId].isOn;
+  const action = newState ? "ON" : "OFF";
 
-    try {
-      await apiCall(lightId, action);
+  try {
+    let token = localStorage.getItem("accessToken");
+    const res = await fetch(`${API_BASE}/device/${lightId}/toggle`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ action }),
+    });
 
-      setLightStates((prev) => ({
-        ...prev,
-        [lightId]: {
-          ...prev[lightId],
-          isOn: newState,
-          manualOverride: true,
-          lastManualAction: now.toISOString(),
-        },
-      }));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Lỗi API");
 
-      setLightHistory((prev) => [
-        ...prev,
-        {
-          lightId,
-          action: action.toLowerCase(),
-          start: now,
-          end: now,
-          duration: 0,
-          timestamp: now,
-        },
-      ]);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
+    setLightStates((prev) => ({
+      ...prev,
+      [lightId]: {
+        ...prev[lightId],
+        isOn: newState,
+      },
+    }));
+  } catch (err) {
+    setError(err.message);
+  }
+};
 
   const handleBrightnessChange = (lightId, newValue) => {
     setLocalBrightness((prev) => ({ ...prev, [lightId]: newValue }));
   };
 
   const handleBrightnessChangeCommitted = async (lightId, newValue) => {
-    const now = new Date();
-    try {
-      await apiCall(lightId, "BRIGHTNESS", newValue);
+  const now = new Date();
+  try {
+    await apiCall(lightId, "BRIGHTNESS", { value: newValue });
 
-      setLightStates((prev) => ({
-        ...prev,
-        [lightId]: {
-          ...prev[lightId],
-          brightness: newValue,
-          manualOverride: true,
-          lastManualAction: now.toISOString(),
-        },
-      }));
-
-      setLightHistory((prev) => [
-        ...prev,
-        {
-          lightId,
-          action: `brightness ${newValue}%`,
-          start: now,
-          end: now,
-          duration: 0,
-          timestamp: now,
-        },
-      ]);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const handleAddLight = () => {
-    if (!newLightId.trim()) {
-      setError("Vui lòng nhập ID cho bóng đèn!");
-      return;
-    }
-    if (lightStates[newLightId]) {
-      setError("ID bóng đèn đã tồn tại!");
-      return;
-    }
-
-    const now = new Date();
     setLightStates((prev) => ({
       ...prev,
-      [newLightId]: {
-        isOn: false,
-        power: 100,
-        brightness: 50,
-        manualOverride: false,
-        lastManualAction: null,
+      [lightId]: {
+        ...prev[lightId],
+        brightness: newValue,
+        manualOverride: true,
+        lastManualAction: now.toISOString(),
       },
     }));
-    setLightHistory((prev) => [
-      ...prev,
-      {
-        lightId: newLightId,
-        action: "added",
-        start: now,
-        end: now,
-        duration: 0,
-        timestamp: now,
+  } catch (err) {
+    setError(err.message);
+  }
+};
+
+
+  const handleAddLight = async () => {
+  if (!newLightId.trim()) {
+    setError("Vui lòng nhập tên cho bóng đèn!");
+    return;
+  }
+
+  try {
+    let token = localStorage.getItem("accessToken");
+    const res = await fetch(`${API_BASE}/device`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
       },
-    ]);
+      body: JSON.stringify({ name: newLightId, location: "Phòng khách" }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Lỗi API");
+
+    const device = data.device;
+    setLightStates((prev) => ({
+      ...prev,
+      [device._id]: {
+        isOn: false,
+        brightness: 50,
+        manualOverride: false,
+      },
+    }));
+
     setNewLightId("");
     setError("");
-  };
+  } catch (err) {
+    setError(err.message);
+  }
+};
+
 
   const handleDeleteLight = (lightId) => {
     if (window.confirm(`Bạn có chắc muốn xóa bóng đèn ${lightId}?`)) {
