@@ -13,7 +13,7 @@ const Login = () => {
     setError("");
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
-        method: "POST",
+        method: "POST", 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({username, password }),
       });
@@ -27,7 +27,8 @@ const Login = () => {
         setError("Không nhận được token từ server");
         return;
       }
-      localStorage.setItem("accesToken", accessToken);
+      localStorage.setItem("accessToken", accessToken);
+      localStorage.setItem("refreshToken", data.refreshToken); 
       localStorage.setItem("isAuthenticated", "true");
 
       navigate("/");

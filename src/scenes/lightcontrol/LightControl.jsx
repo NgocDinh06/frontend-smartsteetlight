@@ -4,6 +4,8 @@ import { tokens } from "../../theme";
 import { useLightState } from "../../App";
 import Header from "../../components/Header";
 
+const API_BASE = "/api"; // bạn chỉnh theo backend của bạn
+
 const LightControl = () => {
   const theme = useTheme();
   const colors = tokens(theme.palette.mode);
@@ -13,23 +15,76 @@ const LightControl = () => {
   const [error, setError] = useState("");
 
   const apiCall = async (lightId, action, status = null) => {
-    try {
-      const res = await fetch("/api/status", {
+  try {
+    let token = localStorage.getItem("accessToken");
+    if (!token) {
+      setError("Bạn chưa đăng nhập. Vui lòng đăng nhập lại.");
+      return null; // 👈 Không văng app nữa
+    }
+
+    // Hàm thực thi request chung
+    const doRequest = async (accessToken) => {
+      return await fetch(`${API_BASE}/status`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ deviceId: lightId, action, status }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Lỗi API");
-      return data;
-    } catch (err) {
-      console.error(err);
-      throw err;
+    };
+
+    let res = await doRequest(token);
+
+    // Nếu token hết hạn → thử refresh
+    if (res.status === 401) {
+      const refreshToken = localStorage.getItem("refreshToken");
+      if (!refreshToken) {
+        throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+      }
+
+      const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+      });
+
+      if (!refreshRes.ok) {
+        throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+      }
+
+      const refreshData = await refreshRes.json();
+      if (!refreshData.accessToken) {
+        throw new Error("Không lấy được access token mới. Vui lòng đăng nhập lại.");
+      }
+
+      localStorage.setItem("accessToken", refreshData.accessToken);
+      token = refreshData.accessToken;
+
+      // Thử lại request ban đầu với token mới
+      res = await doRequest(token);
     }
-  };
+
+    // Kiểm tra response
+    const text = await res.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      throw new Error("Phản hồi không hợp lệ từ server");
+    }
+
+    if (!res.ok) {
+      throw new Error(data.message || "Lỗi API");
+    }
+
+    return data;
+  } catch (err) {
+    console.error("API error:", err);
+    setError(err.message);
+    throw err;
+  }
+};
 
   const handleToggleLight = async (lightId) => {
     const newState = !lightStates[lightId].isOn;
@@ -234,5 +289,6 @@ const LightControl = () => {
     </Box>
   );
 };
+
 
 export default LightControl;

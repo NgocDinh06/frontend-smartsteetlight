@@ -20,71 +20,53 @@ import History from "./scenes/history/History";
 
 const LightStateContext = createContext();
 
+// 🛠️ Hàm parse JSON an toàn
+const safeParse = (key, fallback) => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+
+    // Nếu là "null" hoặc "undefined" dạng string thì bỏ
+    if (raw === "null" || raw === "undefined") {
+      localStorage.removeItem(key);
+      return fallback;
+    }
+
+    const parsed = JSON.parse(raw);
+
+    // Chặn trường hợp không đúng type mong đợi
+    if (Array.isArray(fallback) && !Array.isArray(parsed)) return fallback;
+    if (typeof fallback === "object" && !Array.isArray(fallback) && typeof parsed !== "object") return fallback;
+
+    return parsed;
+  } catch (e) {
+    console.error(`Error parsing ${key} from localStorage:`, e);
+    localStorage.removeItem(key); // xoá dữ liệu hỏng để tránh lỗi lặp lại
+    return fallback;
+  }
+};
+
 function App() {
   const [theme, colorMode] = useMode();
 
   const [lightStates, setLightStates] = useState(() => {
-    const savedStates = localStorage.getItem("lightStates");
-    if (savedStates) {
-      try {
-        const parsedStates = JSON.parse(savedStates);
-        if (parsedStates && typeof parsedStates === "object" && !Array.isArray(parsedStates)) {
-          return parsedStates;
-        } else {
-          console.warn("Invalid lightStates format in localStorage, using default.");
-          return {
-            
-          };
-        }
-      } catch (e) {
-        console.error("Error parsing lightStates from localStorage:", e);
-        return {
-          
-        };
-      }
-    }
-    return {
-    };
+    const parsed = safeParse("lightStates", {});
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
   });
 
-  const [currentEvents, setCurrentEvents] = useState(() => {
-    const savedEvents = localStorage.getItem("currentEvents");
-    if (savedEvents && typeof savedEvents === "string" && savedEvents.trim() !== "") {
-      try {
-        return JSON.parse(savedEvents);
-      } catch (e) {
-        console.error("Error parsing currentEvents from localStorage:", e);
-        return [];
-      }
-    }
-    return [];
-  });
+  const [currentEvents, setCurrentEvents] = useState(() =>
+    safeParse("currentEvents", [])
+  );
 
-  const [completedEvents, setCompletedEvents] = useState(() => {
-    const savedCompleted = localStorage.getItem("completedEvents");
-    if (savedCompleted && typeof savedCompleted === "string" && savedCompleted.trim() !== "") {
-      try {
-        return JSON.parse(savedCompleted);
-      } catch (e) {
-        console.error("Error parsing completedEvents from localStorage:", e);
-        return [];
-      }
-    }
-    return [];
-  });
+  const [completedEvents, setCompletedEvents] = useState(() =>
+    safeParse("completedEvents", [])
+  );
 
-  const [lightHistory, setLightHistory] = useState(() => {
-    const savedHistory = localStorage.getItem("lightHistory");
-    if (savedHistory && typeof savedHistory === "string" && savedHistory.trim() !== "") {
-      try {
-        return JSON.parse(savedHistory);
-      } catch (e) {
-        console.error("Error parsing lightHistory from localStorage:", e);
-        return [];
-      }
-    }
-    return [];
-  });
+  const [lightHistory, setLightHistory] = useState(() =>
+    safeParse("lightHistory", [])
+  );
 
   const updateLightStates = (newStates) => {
     setLightStates(newStates);
@@ -110,43 +92,57 @@ function App() {
     const updatedLightStates = { ...lightStates };
     const activeEvents = currentEvents.filter((event) => {
       const eventStart = new Date(event.start);
-      const eventEnd = event.end ? new Date(event.end) : (event.extendedProps.action === "off" ? new Date(4102444800000) : eventStart);
+      const eventEnd = event.end
+        ? new Date(event.end)
+        : event.extendedProps.action === "off"
+        ? new Date(4102444800000) // 2099-01-01
+        : eventStart;
       return now >= eventStart && now < eventEnd;
     });
 
-    // Đặt trạng thái đèn dựa trên manualOverride, lastManualAction, lastOffEvent và activeEvents
     Object.keys(updatedLightStates).forEach((lightId) => {
-      // Ưu tiên manualOverride nếu có thao tác thủ công trong vòng 5 giây
-      if (updatedLightStates[lightId].manualOverride && updatedLightStates[lightId].lastManualAction) {
-        const lastManualActionTime = new Date(updatedLightStates[lightId].lastManualAction);
-        if (now - lastManualActionTime < 5000) { // Grace period 5 giây
-          return;
+      if (
+        updatedLightStates[lightId].manualOverride &&
+        updatedLightStates[lightId].lastManualAction
+      ) {
+        const lastManualActionTime = new Date(
+          updatedLightStates[lightId].lastManualAction
+        );
+        if (now - lastManualActionTime < 5000) {
+          return; // bỏ qua, người dùng vừa bấm tay
         }
       }
-      if (!activeEvents.some((event) => event.extendedProps.lightId === lightId)) {
-        // Nếu không có sự kiện lịch, sử dụng lastOffEvent để xác định trạng thái
-        updatedLightStates[lightId].isOn = updatedLightStates[lightId].lastOffEvent && !updatedLightStates[lightId].manualOverride ? false : updatedLightStates[lightId].isOn;
+      if (
+        !activeEvents.some((event) => event.extendedProps.lightId === lightId)
+      ) {
         if (!updatedLightStates[lightId].manualOverride) {
-          updatedLightStates[lightId].isOn = false; // Mặc định tắt nếu không có manualOverride
+          updatedLightStates[lightId].isOn = false;
         }
       }
     });
 
-    // Cập nhật trạng thái đèn dựa trên các sự kiện đang hoạt động
     activeEvents.forEach((event) => {
       const lightId = event.extendedProps.lightId;
       if (!updatedLightStates[lightId]) {
-        updatedLightStates[lightId] = { isOn: false, power: 100, brightness: 50, manualOverride: false, lastOffEvent: null, lastManualAction: null };
+        updatedLightStates[lightId] = {
+          isOn: false,
+          power: 100,
+          brightness: 50,
+          manualOverride: false,
+          lastOffEvent: null,
+          lastManualAction: null,
+        };
       }
-      // Chỉ áp dụng sự kiện lịch nếu không có manualOverride gần đây
-      if (!updatedLightStates[lightId].manualOverride || (updatedLightStates[lightId].lastManualAction && now - new Date(updatedLightStates[lightId].lastManualAction) >= 5000)) {
-        updatedLightStates[lightId].isOn = event.extendedProps.action === "on" ? true : false;
+      if (
+        !updatedLightStates[lightId].manualOverride ||
+        (updatedLightStates[lightId].lastManualAction &&
+          now - new Date(updatedLightStates[lightId].lastManualAction) >= 5000)
+      ) {
+        updatedLightStates[lightId].isOn =
+          event.extendedProps.action === "on";
         updatedLightStates[lightId].manualOverride = false;
-        if (event.extendedProps.action === "off") {
-          updatedLightStates[lightId].lastOffEvent = event.start;
-        } else {
-          updatedLightStates[lightId].lastOffEvent = null; // Xóa lastOffEvent khi có sự kiện "Bật"
-        }
+        updatedLightStates[lightId].lastOffEvent =
+          event.extendedProps.action === "off" ? event.start : null;
       }
     });
 
